@@ -1,48 +1,12 @@
-package main
+package parser
 
 import (
-	"net/http"
-	"fmt"
-	"io/ioutil"
-	"bytes"
-	"golang.org/x/text/transform"
-	"io"
-	"golang.org/x/text/encoding"
-	"bufio"
-	"golang.org/x/net/html/charset"
+	"Tiny-Go-Crawler/Crawler/engine"
 	"regexp"
 	"strings"
 )
 
-func main() {
-	res, err := http.Get("https://www.58.com/changecity.html")
-
-	if err != nil {
-		panic(err)
-	}
-
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		fmt.Println("Error: status code", res.StatusCode)
-		return
-	}
-
-	b, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		panic(err)
-	}
-
-	e := determineEncoding(bytes.NewReader((b)))
-	utf8Reader := transform.NewReader(bytes.NewReader(b), e.NewDecoder())
-	all, err := ioutil.ReadAll(utf8Reader)
-	if err != nil {
-		panic(err)
-	}
-	printCityList(all)
-}
-
-func printCityList(contents []byte) {
+func ParseCityList(contents []byte) engine.ParseResult {
 	provinceList := make([]string, 0)
 
 	re := regexp.MustCompile(`provinceList = {([^}]*)`)
@@ -57,7 +21,8 @@ func printCityList(contents []byte) {
 		}
 	}
 
-	cityList := make(map[string]string)
+	result := engine.ParseResult{}
+
 	re = regexp.MustCompile(`independentCityList = {([^}]*)`)
 	matches = re.FindAllSubmatch(contents, -1)
 	for _, m := range matches {
@@ -68,7 +33,12 @@ func printCityList(contents []byte) {
 				independentCityStr := strings.FieldsFunc(sub, splitBySemi)
 				independentCity := strings.Trim(independentCityStr[0], `"`)
 				independentCityAb := strings.FieldsFunc(strings.Trim(independentCityStr[1], `"`), splitByVertical)[0]
-				cityList[independentCity] = independentCityAb
+				independentCityAbUrl := "https://" + independentCityAb + ".58.com"
+				result.Items = append(result.Items, independentCity)
+				result.Requests = append(result.Requests, engine.Request{
+					Url:independentCityAbUrl,
+					ParserFunc: engine.NilParser,
+				})
 			}
 		}
 	}
@@ -84,12 +54,17 @@ func printCityList(contents []byte) {
 					cityStr := strings.FieldsFunc(sub, splitBySemi)
 					city := strings.Trim(cityStr[0], `"`)
 					cityAb := strings.FieldsFunc(strings.Trim(cityStr[1], `"`), splitByVertical)[0]
-					cityList[city] = cityAb
+					cityAbUrl := "https://" + cityAb + ".58.com"
+					result.Items = append(result.Items, city)
+					result.Requests = append(result.Requests, engine.Request{
+						Url:cityAbUrl,
+						ParserFunc: engine.NilParser,
+					})
 				}
 			}
 		}
 	}
-	fmt.Println(len(cityList))
+	return result
 }
 
 func splitByComma(s rune) bool {
@@ -111,14 +86,4 @@ func splitByVertical(s rune) bool {
 		return true
 	}
 	return false
-}
-
-func determineEncoding(r io.Reader) encoding.Encoding {
-	bs, err := bufio.NewReader(r).Peek(1024)
-
-	if err != nil {
-		panic(err)
-	}
-	e, _, _ := charset.DetermineEncoding(bs, "")
-	return e
 }
